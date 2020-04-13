@@ -1,0 +1,50 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${deployment}
+  namespace: ${namespace}
+  labels:
+    app: ${app}
+    stack: ${stack}
+    branch: ${branch}
+spec:
+  replicas: 3
+  progressDeadlineSeconds: 60
+  strategy:
+    rollingUpdate:
+      maxSurge: 3
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: ${app}
+      stack: ${stack}
+      branch: ${branch}
+  template:
+    metadata:
+      labels:
+        app: ${app}
+        stack: ${stack}
+        branch: ${branch}
+    spec:
+      # (shutdown_wait: 60s) + 30s
+      terminationGracePeriodSeconds: 90
+      containers:
+      - name: server
+        image: ${imageName}:${imageTag}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8081
+        env:
+        - name: KUBERNETES_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8081
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081

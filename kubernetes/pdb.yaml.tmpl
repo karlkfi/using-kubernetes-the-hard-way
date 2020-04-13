@@ -1,0 +1,17 @@
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: ${deployment}
+  namespace: ${namespace}
+  labels:
+    app: ${app}
+    stack: ${stack}
+    branch: ${branch}
+spec:
+  maxUnavailable: "30%"
+  selector:
+    matchLabels:
+      app: ${app}
+      stack: ${stack}
+      branch: ${branch}
