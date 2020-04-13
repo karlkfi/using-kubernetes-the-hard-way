@@ -5,9 +5,6 @@ on:
   push:
     branches:
     - master
-    paths:
-    - 'Dockerfile'
-    - 'cmd/*'
   pull_request:
     branches:
     - master
@@ -30,3 +27,5 @@ jobs:
         repository: karlkfi/using-kubernetes-the-hard-way
         tag_with_ref: true
         tag_with_sha: true
+    - name: Cleanup Docker Config
+      run: rm /github/home/.docker/config.json
