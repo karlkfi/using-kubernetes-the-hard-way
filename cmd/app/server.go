@@ -16,18 +16,21 @@ type Content struct {
 // Server wraps http.Server, handles multiple paths, and handles graceful
 // shutdown.
 type Server struct {
-	shutdown bool
-	server   *http.Server
+	shutdownTimeout time.Duration
+	shutdown        bool
+	server          *http.Server
+	port            int
 }
 
 // NewServer wraps a new http.Server and registers all handlers.
-func NewServer() *Server {
+func NewServer(host string, port int, shutdownTimeout time.Duration) *Server {
 	mux := http.NewServeMux()
 
 	s := &Server{
+		shutdownTimeout: shutdownTimeout,
 		server: &http.Server{
 			Handler:      mux,
-			Addr:         fmt.Sprintf("%s:%d", *serveAddr, *servePort),
+			Addr:         fmt.Sprintf("%s:%d", host, port),
 			WriteTimeout: 15 * time.Second,
 			ReadTimeout:  15 * time.Second,
 		},
@@ -40,9 +43,19 @@ func NewServer() *Server {
 	return s
 }
 
+func (s *Server) Handler() http.Handler {
+	return s.server.Handler
+}
+
 // ListenAndServe wraps http.Server.ListenAndServe
+// No error if server closed gracefully.
 func (s *Server) ListenAndServe() error {
-	return s.server.ListenAndServe()
+	err := s.server.ListenAndServe()
+	// http.Server.ListenAndServe always returns err != nil
+	if err != http.ErrServerClosed {
+		return fmt.Errorf("ListenAndServe Errored: %v\n", err)
+	}
+	return nil
 }
 
 // Shutdown triggers healthz to return unhealthy and shuts down the httpServer
@@ -50,12 +63,19 @@ func (s *Server) ListenAndServe() error {
 // In shutdown mode, the server will still respond to requests, but the
 // unhealthy /healthz will eventually cause the load balancer to remove this app
 // from the backend pool.
-func (s *Server) Shutdown() {
+func (s *Server) ShutdownWithTimeout() error {
 	s.shutdown = true
 
-	ctx, cancel := context.WithTimeout(context.Background(), *shutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 	defer cancel()
-	s.server.Shutdown(ctx) // blocks until shut down is complete
+
+	err := s.server.Shutdown(ctx) // blocks until shut down is complete
+	if err == context.Canceled {
+		return fmt.Errorf("Graceful Shutdown Timed Out: %v", err)
+	} else if err != nil {
+		return fmt.Errorf("Graceful Shutdown Errored: %v\n", err)
+	}
+	return nil
 }
 
 // healthzHandler responds as healthy when the app instance is ready to recieve
@@ -64,10 +84,6 @@ func (s *Server) Shutdown() {
 func (s *Server) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	if s.shutdown {
 		w.WriteHeader(http.StatusServiceUnavailable) // 503
-		if s.shutdown {
-			// tell client to disconnect and not "keep-alive" the connection
-			w.Header().Set("Connection", "close")
-		}
 		fmt.Fprintf(w, "shutdown mode")
 		return
 	}
@@ -83,10 +99,6 @@ func (s *Server) rootHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")                                   // HTTP 1.0.
 	w.Header().Set("Expires", "0")                                         // Proxi
 	w.Header().Set("Kubernetes-Pod-Name", os.Getenv("KUBERNETES_POD_NAME"))
-	if s.shutdown {
-		// tell client to disconnect and not "keep-alive" the connection
-		w.Header().Set("Connection", "close")
-	}
 	fmt.Fprintf(w, "Hello World\n")
 }
 
@@ -98,10 +110,6 @@ func (s *Server) jsonHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")                                   // HTTP 1.0.
 	w.Header().Set("Expires", "0")                                         // Proxi
 	w.Header().Set("Kubernetes-Pod-Name", os.Getenv("KUBERNETES_POD_NAME"))
-	if s.shutdown {
-		// tell client to disconnect and not "keep-alive" the connection
-		w.Header().Set("Connection", "close")
-	}
 	w.WriteHeader(http.StatusOK)
 
 	body := &Content{

@@ -18,16 +18,25 @@ var (
 func main() {
 	flag.Parse()
 
-	s := NewServer()
+	s := NewServer(*serveAddr, *servePort, *shutdownTimeout)
+	stopped := make(chan struct{})
 
 	// Trigger graceful shutdown on SIGINT (Ctrl+C) or SIGTERM (Ctrl+/)
 	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGTERM, syscall.SIGINT)
-		<-c
-		s.Shutdown()
-		os.Exit(0)
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+		<-sigCh
+
+		if err := s.ShutdownWithTimeout(); err != nil {
+			log.Printf("%v", err)
+		}
+		close(stopped)
 	}()
 
-	log.Fatal(s.ListenAndServe())
+	if err := s.ListenAndServe(); err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	<-stopped
+	log.Println("Server stopped gracefully")
 }
